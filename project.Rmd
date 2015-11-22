@@ -1,0 +1,132 @@
+---
+title: 'PML: Project'
+author: "Loginova Ekaterina"
+date: "22.11.15"
+output: html_document
+---
+
+## Task
+
+_Dataset:_ 19662 observations of 160 variables.
+
+There were 6 people who took measurements from accelerometers on the belt, forearm, arm, and dumbell while performing an exercise in 5 different ways.
+
+_Goal:_ to predict the manner in which people did the exercise (variable classe).
+
+The variable has 5 levels (A, B, C, D, E), which stans for exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+## Model selection
+
+The machine learning model used in this project is random forest due to the following reasons:
+
+1. This method has high accuracy which is essential for the part of the project where predictions on test data are calculated.
+
+2. There are no strict restrictions on the amount of memory and time used, so the fact that the algorithm is quite slow and requires huge amount of memory for trees is not a critical downside.
+
+## Loading and preprocessing data
+
+Firstly, the libraries and training data for the project are loaded. Data is named *init_data* (initial data) to maintain original values while selecting features (a kind of backup). 
+
+Then, the goal is to reduce the number of features to increase speed of the algorithm without reducing its accuracy. Criteria for removing features are following:
+
+* remove columns with low variance (because such features do little to differentiate one class from another).
+
+The method used to determine features with low variability is nearZeroVar{caret}, so predictors which have one unique value or which have very few unique values relative to the number of samples and the ratio of the frequency of the most common value to the frequency of the second most common value is large are removed.
+
+* remove columns where more than 90% of values is NA (because such features are not really informative).
+
+The treshold is purely empirical, though it seems to be the standard one.
+
+* remove columns which are irrelevant to the classe.
+
+I suppose that time data (when used in random forest), name and ordiecutive number are of little use in predicting the manner in which people did the exercise.
+
+* remove columns which are highly correlated.
+
+The method used is _findCorrelation{caret}_, where argument *corr_matrix* is a correlation matrix of the features selected on previous steps (since they are all numeric, no additional steps are required). The method returns a vector of indices denoting the columns to remove. Alternatively, one could use PCA to preProcess data (I did not use it as I used randomForest package to compute model and not caret).
+
+As a result, the number of features was reduced from 160 to 40.
+
+Finally, selected features and *classe* variable of training data are merged into one data frame.
+
+```{r}
+# include libraries
+library("caret")
+library("randomForest")
+
+# load data
+init_data <- read.csv("pml-training.csv")
+
+# remove columns with low variance
+nsv <- nearZeroVar(init_data, saveMetrics = TRUE)
+drops <- colnames(init_data)[nsv$nzv]
+features <- init_data[,!(names(init_data) %in% drops)]
+
+# remove columns with all NAs or nearly all NA's
+features <- features[, colSums(is.na(features)) <= 0.9*nrow(features)]
+
+# remove irrelevant columns
+features <- features[,c(7:58)]
+
+# remove highly correlated columns
+corr_matrix <- cor(features)
+drops <- findCorrelation(corr_matrix, cutoff=.8)
+features <- features[,!(names(features) %in% colnames(features)[drops])]
+
+# merge selected features and variable to predict
+data <- cbind(features,init_data$classe)
+colnames(data)[40] <- 'classe'
+```
+
+
+## Training and evaluation
+
+Let me begin with the explanation of the steps inside the for loop and then clarify why this loop is used:
+
+1. The random seed value (which are stored) is set to ensure reproducibility of results.
+
+2. The data is divided into two parts: 60% - training, 40% - testing.
+
+3. The model is trained on train data with the use of randomForest package (because of its speed).
+
+4. Prediction for test data is calculated and saved.
+
+The loop is a type of cross-validation. It is required to estimate out-of-sample error. When several iterations (defined by *iter* variable) are made, there is a vector of accuracy values for test data (not the same one, since we can only use it once). Out-of-sample error is calculated as 1 - mean(test_accuracy)
+
+On test cases provided in Submission part, the result was 20/20. 
+
+
+```{r}
+iter <- 5
+seed_values <- sample(0:1000, iter)
+test_accuracy <- numeric(iter)
+k = 0
+
+for (i in seed_values) {
+    k = k + 1
+    set.seed(i)
+    
+    indTrain <- createDataPartition(data$classe, p = 0.6, list = FALSE)
+    train_data <- data[indTrain,]
+    test_data <- data[-indTrain,]
+    
+    modelFit <- randomForest(classe~., train_data)
+    
+    pred_test <- predict(modelFit, test_data)
+    res_test <- confusionMatrix(pred_test, test_data$classe)
+    test_accuracy[k] <- res_test$overall[[1]]
+}
+
+test_accuracy_mean <- mean(test_accuracy)
+print("Estimation for out-of-sample error:")
+print(1 - test_accuracy_mean)
+
+```
+
+
+## Sources
+
+* Caret documentation: http://www.inside-r.org/packages/cran/caret
+
+* Groupware@LES: http://groupware.les.inf.puc-rio.br/har
+
